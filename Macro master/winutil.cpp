@@ -236,9 +236,28 @@ void windows::PressKey(int key) {
     INPUT input;
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
+    input.ki.wScan = 0;  // Use MapVirtualKey to get the scan code
     input.ki.dwFlags = 0; // 0 for key press
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
 
-    // Simulate key press
+    if (key >= VK_LBUTTON && key <= VK_XBUTTON2) {
+        input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+
+        if (key == VK_RBUTTON) {
+            input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+        }
+        else if (key == VK_MBUTTON) {
+            input.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN;
+        }
+        else if (key >= VK_XBUTTON1 && key <= VK_XBUTTON2) {
+            int buttonOffset = key - VK_XBUTTON1;
+            input.mi.dwFlags = MOUSEEVENTF_XDOWN | (buttonOffset << 2);
+        }
+    }
+
+    // Simulate key press or mouse button press
     SendInput(1, &input, sizeof(INPUT));
 }
 
@@ -246,8 +265,27 @@ void windows::ReleaseKey(int key) {
     INPUT input;
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
-    input.ki.dwFlags = KEYEVENTF_KEYUP; // Key release flag
+    input.ki.wScan = 0;  // Use MapVirtualKey to get the scan code
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
 
-    // Simulate key release
+    if (key >= VK_LBUTTON && key <= VK_XBUTTON2) {
+        input.type = INPUT_MOUSE;
+        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+
+        if (key == VK_RBUTTON) {
+            input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+        }
+        else if (key == VK_MBUTTON) {
+            input.mi.dwFlags = MOUSEEVENTF_MIDDLEUP;
+        }
+        else if (key >= VK_XBUTTON1 && key <= VK_XBUTTON2) {
+            int buttonOffset = key - VK_XBUTTON1;
+            input.mi.dwFlags = MOUSEEVENTF_XUP | (buttonOffset << 2);
+        }
+    }
+
+    // Simulate key release or mouse button release
     SendInput(1, &input, sizeof(INPUT));
-}
+} 

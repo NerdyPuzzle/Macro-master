@@ -12,6 +12,8 @@
 #include "winutil.h"
 #include <map>
 #include "icon.h"
+#include "gui_file_dialogs.h"
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -21,13 +23,27 @@ Image icon = { 0 };
 
 std::string macro_dir = (std::string)getenv("USERPROFILE") + "\\.macromaster";
 
+json loaded_macro;
+std::vector<json> macros;
+std::vector<std::string> macro_names;
+
 double elapsedTime = 0;
 
-int recording_fps = 45;
+// recording state variables
+long long int recorded_frames = 0;
+std::vector<int> previous_inputs;
+std::pair<int, int> previous_mousepos = { -1, -1 };
+bool first_frame = false;
+
+// playing state variables
+long long int played_frames = 0;
+bool loop_frames = false;
+
+int recording_fps = 60;
 int selected_macro = -1;
 
-bool should_record = false;
-bool recording = true;
+bool recording = false;
+bool playing = false;
 
 void SetStyle() {
 	ImGuiStyle* style = &ImGui::GetStyle();
@@ -93,14 +109,82 @@ void LoadIcon() {
 	icon.mipmaps = 1;
 }
 
+void StartRecording() {
+	selected_macro = -1;
+	loaded_macro.clear();
+	first_frame = true;
+	recording = true;
+}
+
+void RecordFrame() {
+	std::vector<int> inputs = windows::GetCurrentInputs();
+	std::pair<int, int> mousepos = windows::GetMousePos();
+
+	if (first_frame) {
+		first_frame = false;
+		loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = {mousepos.first, mousepos.second};
+		if (!inputs.empty())
+			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_down"] = inputs;
+	}
+	else {
+		if ((mousepos.first != previous_mousepos.first) || (mousepos.second != previous_mousepos.second))
+			loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = { mousepos.first, mousepos.second };
+		std::vector<int> released_inputs;
+		std::vector<int> pressed_inputs;
+		for (const int input : inputs) {
+			if (std::find(previous_inputs.begin(), previous_inputs.end(), input) == previous_inputs.end())
+				pressed_inputs.push_back(input);
+		}
+		for (const int input : previous_inputs) {
+			if (std::find(inputs.begin(), inputs.end(), input) == inputs.end())
+				released_inputs.push_back(input);
+		}
+		if (!pressed_inputs.empty())
+			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_down"] = pressed_inputs;
+		if (!released_inputs.empty())
+			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_released"] = released_inputs;
+	}
+
+	previous_inputs = inputs;
+	previous_mousepos = mousepos;
+
+	recorded_frames++;
+}
+
+void FinishRecording() {
+	recording = false;
+	loaded_macro["frames"] = recorded_frames;
+	recorded_frames = 0;
+	elapsedTime = 0;
+	std::ofstream out("test.json");
+	out << loaded_macro.dump(2);
+	out.close();
+}
+
+void PlayFrame(long long int frame) {
+	if (loaded_macro.empty())
+		return;
+
+	if (loaded_macro.contains("frame_" + std::to_string(frame))) {
+		if (loaded_macro.at("frame_" + std::to_string(frame)).contains("mouse_pos"))
+			windows::SetMousePos(loaded_macro.at("frame_" + std::to_string(frame)).at("mouse_pos").at(0), loaded_macro.at("frame_" + std::to_string(frame)).at("mouse_pos").at(1));
+		if (loaded_macro.at("frame_" + std::to_string(frame)).contains("inputs_released"))
+			for (const int input : loaded_macro.at("frame_" + std::to_string(frame)).at("inputs_released"))
+				windows::ReleaseKey(input);
+		if (loaded_macro.at("frame_" + std::to_string(frame)).contains("inputs_down"))
+			for (const int input : loaded_macro.at("frame_" + std::to_string(frame)).at("inputs_down"))
+				windows::PressKey(input);
+	}
+}
+
 int main() {
 	LoadIcon();
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_ALWAYS_RUN);
     InitWindow(600, 800, "Macro master");
 	SetWindowIcon(icon);
     SetWindowMinSize(200, 400);
-	SetTargetFPS(60);
-	SetExitKey(0);
+	SetTargetFPS(144);
+	SetExitKey(60);
     rlImGuiSetup(true);
 	SetStyle();
 
@@ -118,12 +202,39 @@ int main() {
 			elapsedTime += deltaTime;
 
 			// Check if the desired frame rate is reached
-			if (elapsedTime >= 1.0 / recording_fps)
+			if (elapsedTime >= 1.0 / 60)
 			{
 				// Reset the elapsed time
 				elapsedTime = 0;
 
-				should_record = true;
+				RecordFrame();
+			}
+
+		}
+
+		if (playing) {
+			double deltaTime = GetFrameTime();
+
+			// Accumulate the elapsed time
+			elapsedTime += deltaTime;
+
+			// Check if the desired frame rate is reached
+			if (elapsedTime >= 1.0 / 60)
+			{
+				// Reset the elapsed time
+				elapsedTime = 0;
+
+				PlayFrame(played_frames);
+				played_frames++;
+
+				if (played_frames >= loaded_macro.at("frames")) {
+					if (!loop_frames) {
+						playing = false;
+						played_frames = 0;
+					}
+					else
+						played_frames = 0;
+				}
 			}
 		}
 
@@ -131,21 +242,46 @@ int main() {
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
 				if (ImGui::MenuItem("Import")) {
-
+					char path[1024] = { 0 };
+					int result = GuiFileDialog(DIALOG_OPEN_FILE, "Import macro", path, "*.macro", "Macro master file (.macro)");
+					if (result == 1) {
+						std::ifstream macro((std::string)path);
+						json m = json::parse(macro);
+						if (std::find(macro_names.begin(), macro_names.end(), m.at("name")) == macro_names.end()) {
+							macros.push_back(m);
+							fs::copy_file((std::string)path, macro_dir + "\\" + (std::string)GetFileName(path));
+						}
+						macro.close();
+					}
 				}
 				ImGui::Separator();
-				if (ImGui::MenuItem("Save")) {
+				if (!recording) {
+					if (ImGui::MenuItem("Record", nullptr, nullptr, (!playing))) {
+						StartRecording();
+					}
+				}
+				else {
+					if (ImGui::MenuItem("Stop recording")) {
+						FinishRecording();
+					}
+				}
+				if (ImGui::MenuItem("Play", nullptr, nullptr, (!recording))) {
+					if (!recording)
+						playing = true;
+				}
+				ImGui::Separator();
+				if (ImGui::MenuItem("Save", nullptr, nullptr, (!playing && !recording))) {
 
 				}
-				if (ImGui::MenuItem("Delete")) {
+				if (ImGui::MenuItem("Delete", nullptr, nullptr, (!playing && !recording))) {
 
 				}
                 ImGui::EndMenu();
             }
-			if (ImGui::BeginMenu("Macros")) {
+			if (ImGui::BeginMenu("Macros", (!playing && !recording))) {
 				ImGui::EndMenu();
 			}
-			if (ImGui::BeginMenu("Preferences")) {
+			if (ImGui::BeginMenu("Preferences", (!playing && !recording))) {
 				ImGui::EndMenu();
 			}
             ImGui::EndMainMenuBar();
@@ -170,8 +306,6 @@ int main() {
 
             ImGui::End();
         }
-
-		should_record = false;
 
         rlImGuiEnd();
         BeginDrawing();
