@@ -28,6 +28,8 @@ json loaded_macro;
 std::vector<json> macros;
 std::vector<std::string> macro_names;
 
+json settings;
+
 double elapsedTime = 0;
 
 // recording state variables
@@ -39,15 +41,34 @@ bool first_frame = false;
 // playing state variables
 long long int played_frames = 0;
 bool loop_frames = false;
+bool ignore_delays = false;
 
 int recording_fps = 60;
+int playing_fps = 60;
 int selected_macro = -1;
+
+// keybinds
+int keybind_import = 77;
+int keybind_record = 70;
+int keybind_play = 71;
+int keybind_save = 67;
+int keybind_delete = 87;
 
 bool recording = false;
 bool wait = false;
 bool playing = false;
 bool save = false;
 bool save_set_pos = true;
+bool keybinds = false;
+bool keybinds_Set_pos = true;
+bool settings_recording = false;
+bool settings_recording_set_pos = true;
+bool settings_playback = false;
+bool settings_playback_set_pos = true;
+
+ImVec4 ConvertColor(::Color color) {
+	return ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+}
 
 void SetStyle() {
 	ImGuiStyle* style = &ImGui::GetStyle();
@@ -113,6 +134,38 @@ void LoadIcon() {
 	icon.mipmaps = 1;
 }
 
+void LoadSettings() {
+	std::ifstream in(macro_dir + "\\settings.json");
+	if (in.is_open()) {
+		settings = json::parse(in);
+		loop_frames = settings.at("playback").at("should_loop");
+		playing_fps = settings.at("playback").at("framerate");
+		ignore_delays = settings.at("playback").at("ignore_delays");
+		recording_fps = settings.at("recording").at("framerate");
+		keybind_import = settings.at("keybinds").at("import");
+		keybind_record = settings.at("keybinds").at("record");
+		keybind_play = settings.at("keybinds").at("play");
+		keybind_save = settings.at("keybinds").at("save");
+		keybind_delete = settings.at("keybinds").at("delete");
+	}
+	in.close();
+}
+
+void SaveSettings() {
+	settings["playback"]["should_loop"] = loop_frames;
+	settings["playback"]["framerate"] = playing_fps;
+	settings["playback"]["ignore_delays"] = ignore_delays;
+	settings["recording"]["framerate"] = recording_fps;
+	settings["keybinds"]["import"] = keybind_import;
+	settings["keybinds"]["record"] = keybind_record;
+	settings["keybinds"]["play"] = keybind_play;
+	settings["keybinds"]["save"] = keybind_save;
+	settings["keybinds"]["delete"] = keybind_delete;
+	std::ofstream out(macro_dir + "\\settings.json");
+	out << settings.dump(2);
+	out.close();
+}
+
 void StartRecording() {
 	selected_macro = -1;
 	loaded_macro.clear();
@@ -160,9 +213,6 @@ void FinishRecording() {
 	loaded_macro["frames"] = recorded_frames;
 	recorded_frames = 0;
 	elapsedTime = 0;
-	std::ofstream out("test.json");
-	out << loaded_macro.dump(2);
-	out.close();
 }
 
 void PlayFrame(long long int frame) {
@@ -205,6 +255,10 @@ int main() {
 		}
 	}
 
+	if (fs::exists(macro_dir + "\\settings.json")) {
+		LoadSettings();
+	}
+
     while (!WindowShouldClose()) {
         ClearBackground(BLACK);
         rlImGuiBegin();
@@ -234,7 +288,7 @@ int main() {
 			elapsedTime += deltaTime;
 
 			// Check if the desired frame rate is reached
-			if (elapsedTime >= 1.0 / recording_fps)
+			if (elapsedTime >= 1.0 / playing_fps)
 			{
 				// Reset the elapsed time
 				elapsedTime = 0;
@@ -256,7 +310,8 @@ int main() {
         // main menu bar
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-				if (ImGui::MenuItem("Import", nullptr, nullptr, (!playing && !recording))) {
+				std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_import) + ")";
+				if (ImGui::MenuItem("Import", shortcut.c_str(), nullptr, (!playing && !recording))) {
 					char path[1024] = { 0 };
 					int result = GuiFileDialog(DIALOG_OPEN_FILE, "Import macro", path, "*.macro", "Macro master file (.macro)");
 					if (result == 1) {
@@ -272,7 +327,8 @@ int main() {
 				}
 				ImGui::Separator();
 				if (!recording) {
-					if (ImGui::MenuItem("Record", nullptr, nullptr, (!playing))) {
+					std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_record) + ")";
+					if (ImGui::MenuItem("Record", shortcut.c_str(), nullptr, (!playing))) {
 						if (!wait)
 							StartRecording();
 						else
@@ -280,12 +336,14 @@ int main() {
 					}
 				}
 				else {
-					if (ImGui::MenuItem("Stop recording")) {
+					std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_record) + ")";
+					if (ImGui::MenuItem("Stop recording", shortcut.c_str())) {
 						FinishRecording();
 					}
 				}
 				if (!playing) {
-					if (ImGui::MenuItem("Play", nullptr, nullptr, (!recording))) {
+					std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_play) + ")";
+					if (ImGui::MenuItem("Play", shortcut.c_str(), nullptr, (!recording))) {
 						if (!recording && !loaded_macro.empty()) {
 							playing = true;
 							wait = true;
@@ -293,13 +351,15 @@ int main() {
 					}
 				}
 				else {
-					if (ImGui::MenuItem("Stop playing")) {
-						playing - false;
+					std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_play) + ")";
+					if (ImGui::MenuItem("Stop playing", shortcut.c_str())) {
+						playing = false;
 						wait = false;
 					}
 				}
 				ImGui::Separator();
-				if (ImGui::MenuItem("Save", nullptr, nullptr, (!playing && !recording))) {
+				std::string shortcut_ = "(Ctrl + " + windows::GetInputName(keybind_save) + ")";
+				if (ImGui::MenuItem("Save", shortcut_.c_str(), nullptr, (!playing && !recording))) {
 					if (!loaded_macro.empty()) {
 						if (!loaded_macro.contains("name"))
 							save = true;
@@ -310,7 +370,8 @@ int main() {
 						}
 					}
 				}
-				if (ImGui::MenuItem("Delete", nullptr, nullptr, (!playing && !recording))) {
+				std::string shortcut__ = "(Ctrl + " + windows::GetInputName(keybind_delete) + ")";
+				if (ImGui::MenuItem("Delete", shortcut__.c_str(), nullptr, (!playing && !recording))) {
 					if (selected_macro != -1) {
 						if (loaded_macro.contains("name")) {
 							fs::remove(macro_dir + "\\macros\\" + (std::string)loaded_macro["name"] + ".macro");
@@ -336,6 +397,16 @@ int main() {
 				ImGui::EndMenu();
 			}
 			if (ImGui::BeginMenu("Preferences", (!playing && !recording))) {
+				if (ImGui::MenuItem("Keybinds")) {
+
+				}
+				ImGui::Separator();
+				if (ImGui::MenuItem("Playback")) {
+
+				}
+				if (ImGui::MenuItem("Recording")) {
+
+				}
 				ImGui::EndMenu();
 			}
             ImGui::EndMainMenuBar();
@@ -347,9 +418,9 @@ int main() {
 				save_set_pos = false;
 				ImGui::OpenPopup("Save macro");
 				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 133) / 2 });
-				ImGui::SetNextWindowSize({ 300, 133 });
 			}
-			if (ImGui::BeginPopupModal("Save macro"), &save, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize) {
+			ImGui::SetNextWindowSize({ 300, 133 });
+			if (ImGui::BeginPopupModal("Save macro", &save, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
 				ImGui::AlignTextToFramePadding();
 				ImGui::Text("Macro name:");
 				ImGui::SameLine();
@@ -358,7 +429,7 @@ int main() {
 				ImGui::Spacing();
 				ImGui::SetCursorPosX(65);
 				bool duplicate = std::find(macro_names.begin(), macro_names.end(), macroname) != macro_names.end();
-				if (ImGui::Button("Save", { 75, 30 }) && !duplicate) {
+				if (ImGui::Button("Save", { 75, 30 }) && !duplicate && !macroname.empty()) {
 					save = false;
 					loaded_macro["name"] = macroname;
 					std::ofstream out(macro_dir + "\\macros\\" + macroname + ".macro");
@@ -387,7 +458,6 @@ int main() {
 			save_set_pos = true;
 		}
 
-
         // main window
         ImGui::SetNextWindowPos({ 0, 27 }, ImGuiCond_Once);
 		ImGui::SetNextWindowSize({ (float)GetScreenWidth(), (float)GetScreenHeight() - 27 });
@@ -396,7 +466,6 @@ int main() {
 			// menu bar
 			if (ImGui::BeginMenuBar()) {
 				if (playing || recording) {
-					//ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
 					ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
 				}
 				if (ImGui::Button(std::format(" {} ", ICON_FA_PLAY).c_str())) {
@@ -415,7 +484,6 @@ int main() {
 				}
 				ImGui::PopID();
 				if (playing || recording) {
-					//ImGui::PopItemFlag();
 					ImGui::PopStyleVar();
 				}
 				ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 10);
@@ -429,6 +497,26 @@ int main() {
 					}
 				}
 				ImGui::PopID();
+				if (playing || recording) {
+					ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+				}
+				ImGui::PushID(4);
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 10);
+				if (ImGui::Button(std::format(" {} ", ICON_FA_FLOPPY_DISK).c_str())) {
+					if (!loaded_macro.empty()) {
+						if (!loaded_macro.contains("name"))
+							save = true;
+						else {
+							std::ofstream out(macro_dir + "\\macros\\" + (std::string)loaded_macro.at("name") + ".macro");
+							out << loaded_macro.dump(2);
+							out.close();
+						}
+					}
+				}
+				ImGui::PopID();
+				if (playing || recording) {
+					ImGui::PopStyleVar();
+				}
 				ImGui::EndMenuBar();
 			}
 
@@ -508,7 +596,76 @@ int main() {
 				}
 			}
 
+			// shortcuts
+			if (windows::InputIsHeld(17) && windows::InputIsHeld(keybind_import)) {
+				windows::ReleaseKey(keybind_import);
+				char path[1024] = { 0 };
+				int result = GuiFileDialog(DIALOG_OPEN_FILE, "Import macro", path, "*.macro", "Macro master file (.macro)");
+				if (result == 1) {
+					std::ifstream macro((std::string)path);
+					json m = json::parse(macro);
+					if (std::find(macro_names.begin(), macro_names.end(), m.at("name")) == macro_names.end()) {
+						macros.push_back(m);
+						macro_names.push_back(m.at("name"));
+						fs::copy_file((std::string)path, macro_dir + "\\macros\\" + (std::string)GetFileName(path));
+					}
+					macro.close();
+				}
+			}
+			else if (windows::InputIsHeld(17) && windows::InputIsHeld(keybind_record)) {
+				windows::ReleaseKey(keybind_record);
+				if (!recording) {
+					if (!wait)
+						StartRecording();
+					else
+						wait = false;
+				}
+				else {
+					FinishRecording();
+				}
+			}
+			else if (windows::InputIsHeld(17) && windows::InputIsHeld(keybind_play)) {
+				windows::ReleaseKey(keybind_play);
+				if (!playing) {
+					if (!recording && !loaded_macro.empty()) {
+						playing = true;
+						wait = true;
+					}
+				}
+				else {
+					playing = false;
+					wait = false;
+				}
+			}
+			else if (windows::InputIsHeld(17) && windows::InputIsHeld(keybind_save)) {
+				windows::ReleaseKey(keybind_save);
+				if (!loaded_macro.empty()) {
+					if (!loaded_macro.contains("name"))
+						save = true;
+					else {
+						std::ofstream out(macro_dir + "\\macros\\" + (std::string)loaded_macro.at("name") + ".macro");
+						out << loaded_macro.dump(2);
+						out.close();
+					}
+				}
+			}
+			else if (windows::InputIsHeld(17) && windows::InputIsHeld(keybind_delete)) {
+				windows::ReleaseKey(keybind_delete);
+				if (selected_macro != -1) {
+					if (loaded_macro.contains("name")) {
+						fs::remove(macro_dir + "\\macros\\" + (std::string)loaded_macro["name"] + ".macro");
+						macros.erase(macros.begin() + selected_macro);
+						macro_names.erase(macro_names.begin() + selected_macro);
+						selected_macro = -1;
+						loaded_macro.clear();
+					}
+				}
+				else if (!loaded_macro.empty())
+					loaded_macro.clear();
+			}
+
             ImGui::End();
+
         }
 
         rlImGuiEnd();
