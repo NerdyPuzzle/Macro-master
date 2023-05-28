@@ -11,9 +11,10 @@
 #include <format>
 #include "winutil.h"
 #include <map>
-#include "icon.h"
 #include "gui_file_dialogs.h"
 #include <fstream>
+#include <imgui_internal.h>
+#include "icon.h"
 
 namespace fs = std::filesystem;
 
@@ -37,11 +38,11 @@ long long int recorded_frames = 0;
 std::vector<int> previous_inputs;
 std::pair<int, int> previous_mousepos = { -1, -1 };
 bool first_frame = false;
+bool ignore_delays = false;
 
 // playing state variables
 long long int played_frames = 0;
 bool loop_frames = false;
-bool ignore_delays = false;
 
 int recording_fps = 60;
 int playing_fps = 60;
@@ -60,7 +61,7 @@ bool playing = false;
 bool save = false;
 bool save_set_pos = true;
 bool keybinds = false;
-bool keybinds_Set_pos = true;
+bool keybinds_set_pos = true;
 bool settings_recording = false;
 bool settings_recording_set_pos = true;
 bool settings_playback = false;
@@ -68,6 +69,38 @@ bool settings_playback_set_pos = true;
 
 ImVec4 ConvertColor(::Color color) {
 	return ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+}
+
+void ToggleButton(const char* str_id, bool* v, float size) {
+	ImVec2 p = ImGui::GetCursorScreenPos();
+	ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+	float height = size;
+	float width = height * 1.55f;
+	float radius = height * 0.50f;
+
+	ImGui::InvisibleButton(str_id, ImVec2(width, height));
+	if (ImGui::IsItemClicked())
+		*v = !*v;
+
+	float t = *v ? 1.0f : 0.0f;
+
+	ImGuiContext& g = *GImGui;
+	float ANIM_SPEED = 0.08f;
+	if (g.LastActiveId == g.CurrentWindow->GetID(str_id))// && g.LastActiveIdTimer < ANIM_SPEED)
+	{
+		float t_anim = ImSaturate(g.LastActiveIdTimer / ANIM_SPEED);
+		t = *v ? (t_anim) : (1.0f - t_anim);
+	}
+
+	ImU32 col_bg;
+	if (ImGui::IsItemHovered())
+		col_bg = ImGui::GetColorU32(ImLerp(ImVec4(0.78f, 0.78f, 0.78f, 1.0f), ImVec4(0.64f, 0.83f, 0.34f, 1.0f), t)); // Hovered inactive, Hovered active
+	else
+		col_bg = ImGui::GetColorU32(ImLerp(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), ImVec4(0.56f, 0.83f, 0.26f, 1.0f), t)); // ??, ??
+
+	draw_list->AddRectFilled(p, ImVec2(p.x + width, p.y + height), col_bg, height * 0.5f);
+	draw_list->AddCircleFilled(ImVec2(p.x + radius + t * (width - radius * 2.0f), p.y + radius), radius - 1.5f, IM_COL32(255, 255, 255, 255));
 }
 
 void SetStyle() {
@@ -140,7 +173,7 @@ void LoadSettings() {
 		settings = json::parse(in);
 		loop_frames = settings.at("playback").at("should_loop");
 		playing_fps = settings.at("playback").at("framerate");
-		ignore_delays = settings.at("playback").at("ignore_delays");
+		ignore_delays = settings.at("recording").at("ignore_delays");
 		recording_fps = settings.at("recording").at("framerate");
 		keybind_import = settings.at("keybinds").at("import");
 		keybind_record = settings.at("keybinds").at("record");
@@ -154,7 +187,7 @@ void LoadSettings() {
 void SaveSettings() {
 	settings["playback"]["should_loop"] = loop_frames;
 	settings["playback"]["framerate"] = playing_fps;
-	settings["playback"]["ignore_delays"] = ignore_delays;
+	settings["recording"]["ignore_delays"] = ignore_delays;
 	settings["recording"]["framerate"] = recording_fps;
 	settings["keybinds"]["import"] = keybind_import;
 	settings["keybinds"]["record"] = keybind_record;
@@ -184,8 +217,13 @@ void RecordFrame() {
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_down"] = inputs;
 	}
 	else {
+		bool mouse_empty = false;
+		bool presses_empty = false;
+		bool releases_empty = false;
 		if ((mousepos.first != previous_mousepos.first) || (mousepos.second != previous_mousepos.second))
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = { mousepos.first, mousepos.second };
+		else
+			mouse_empty = true;
 		std::vector<int> released_inputs;
 		std::vector<int> pressed_inputs;
 		for (const int input : inputs) {
@@ -198,8 +236,14 @@ void RecordFrame() {
 		}
 		if (!pressed_inputs.empty())
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_down"] = pressed_inputs;
+		else
+			presses_empty = true;
 		if (!released_inputs.empty())
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_released"] = released_inputs;
+		else
+			releases_empty = true;
+		if (ignore_delays && mouse_empty && presses_empty && releases_empty)
+			recorded_frames--;
 	}
 
 	previous_inputs = inputs;
@@ -257,6 +301,9 @@ int main() {
 
 	if (fs::exists(macro_dir + "\\settings.json")) {
 		LoadSettings();
+	}
+	else {
+		SaveSettings();
 	}
 
     while (!WindowShouldClose()) {
@@ -353,6 +400,7 @@ int main() {
 				else {
 					std::string shortcut = "(Ctrl + " + windows::GetInputName(keybind_play) + ")";
 					if (ImGui::MenuItem("Stop playing", shortcut.c_str())) {
+						played_frames = 0;
 						playing = false;
 						wait = false;
 					}
@@ -398,14 +446,14 @@ int main() {
 			}
 			if (ImGui::BeginMenu("Preferences", (!playing && !recording))) {
 				if (ImGui::MenuItem("Keybinds")) {
-
+					keybinds = true;
 				}
 				ImGui::Separator();
-				if (ImGui::MenuItem("Playback")) {
-
-				}
 				if (ImGui::MenuItem("Recording")) {
-
+					settings_recording = true;
+				}
+				if (ImGui::MenuItem("Playback")) {
+					settings_playback = true;
 				}
 				ImGui::EndMenu();
 			}
@@ -418,8 +466,8 @@ int main() {
 				save_set_pos = false;
 				ImGui::OpenPopup("Save macro");
 				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 133) / 2 });
+				ImGui::SetNextWindowSize({ 300, 133 });
 			}
-			ImGui::SetNextWindowSize({ 300, 133 });
 			if (ImGui::BeginPopupModal("Save macro", &save, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
 				ImGui::AlignTextToFramePadding();
 				ImGui::Text("Macro name:");
@@ -458,6 +506,188 @@ int main() {
 			save_set_pos = true;
 		}
 
+		// keybind settings
+		if (keybinds) {
+			if (keybinds_set_pos) {
+				keybinds_set_pos = false;
+				ImGui::OpenPopup("Keybind settings");
+				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 335) / 2, (float)(GetScreenHeight() - 270) / 2 });
+				ImGui::SetNextWindowSize({ 335, 270 });
+			}
+			if (ImGui::BeginPopupModal("Keybind settings", &keybinds, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Import keybind: Ctrl +");
+				ImGui::SameLine();
+				ImGui::PushID(2);
+				ImGui::Button(windows::GetInputName(keybind_import).c_str());
+				ImGui::PopID();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Click a key.");
+					ImGui::EndTooltip();
+					std::vector<int> keys = windows::GetCurrentInputs();
+					if (!keys.empty())
+						keybind_import = keys[0];
+				}
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Record keybind: Ctrl +");
+				ImGui::SameLine();
+				ImGui::PushID(3);
+				ImGui::Button(windows::GetInputName(keybind_record).c_str());
+				ImGui::PopID();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Click a key.");
+					ImGui::EndTooltip();
+					std::vector<int> keys = windows::GetCurrentInputs();
+					if (!keys.empty())
+						keybind_record = keys[0];
+				}
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Play keybind: Ctrl +");
+				ImGui::SameLine();
+				ImGui::PushID(4);
+				ImGui::Button(windows::GetInputName(keybind_play).c_str());
+				ImGui::PopID();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Click a key.");
+					ImGui::EndTooltip();
+					std::vector<int> keys = windows::GetCurrentInputs();
+					if (!keys.empty())
+						keybind_play = keys[0];
+				}
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Save keybind: Ctrl +");
+				ImGui::SameLine();
+				ImGui::PushID(5);
+				ImGui::Button(windows::GetInputName(keybind_save).c_str());
+				ImGui::PopID();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Click a key.");
+					ImGui::EndTooltip();
+					std::vector<int> keys = windows::GetCurrentInputs();
+					if (!keys.empty())
+						keybind_save = keys[0];
+				}
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Delete keybind: Ctrl +");
+				ImGui::SameLine();
+				ImGui::PushID(6);
+				ImGui::Button(windows::GetInputName(keybind_delete).c_str());
+				ImGui::PopID();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Click a key.");
+					ImGui::EndTooltip();
+					std::vector<int> keys = windows::GetCurrentInputs();
+					if (!keys.empty())
+						keybind_delete = keys[0];
+				}
+				ImGui::SetCursorPosX(73.75);
+				if (ImGui::Button("Save", { 83.75, 30 })) {
+					SaveSettings();
+					keybinds = false;
+					keybinds_set_pos = true;
+				}
+				ImGui::SameLine();
+				ImGui::SetCursorPosX(177.5);
+				if (ImGui::Button("Cancel", { 83.75, 30 })) {
+					LoadSettings();
+					keybinds = false;
+					keybinds_set_pos = true;
+				}
+				ImGui::End();
+			}
+		}
+		else {
+			if (!keybinds_set_pos) {
+				keybinds_set_pos = true;
+				LoadSettings();
+			}
+		}
+
+		// recording settings
+		if (settings_recording) {
+			if (settings_recording_set_pos) {
+				settings_recording_set_pos = false;
+				ImGui::OpenPopup("Recording settings");
+				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 155) / 2 });
+				ImGui::SetNextWindowSize({ 300, 155 });
+			}
+			if (ImGui::BeginPopupModal("Recording settings", &settings_recording, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Recording framerate:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(ImGui::GetColumnWidth());
+				ImGui::SliderInt(" ", &recording_fps, 1, 60);
+				ImGui::Text("Ignore empty frames:");
+				ImGui::SameLine();
+				ToggleButton("frames_ignr", &ignore_delays, 22);
+				ImGui::SetCursorPosX(65);
+				if (ImGui::Button("Save", { 75, 30 })) {
+					SaveSettings();
+					settings_recording = false;
+					settings_recording_set_pos = true;
+				}
+				ImGui::SameLine();
+				ImGui::SetCursorPosX(160);
+				if (ImGui::Button("Cancel", { 75, 30 })) {
+					LoadSettings();
+					settings_recording = false;
+					settings_recording_set_pos = true;
+				}
+				ImGui::End();
+			}
+		}
+		else {
+			if (!settings_recording_set_pos) {
+				settings_recording_set_pos = true;
+				LoadSettings();
+			}
+		}
+
+		// playback settings
+		if (settings_playback) {
+			if (settings_playback_set_pos) {
+				settings_playback_set_pos = false;
+				ImGui::OpenPopup("Playback settings");
+				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 155) / 2 });
+				ImGui::SetNextWindowSize({ 300, 155 });
+			}
+			if (ImGui::BeginPopupModal("Playback settings", &settings_playback, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
+				ImGui::AlignTextToFramePadding();
+				ImGui::Text("Playback framerate:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(ImGui::GetColumnWidth());
+				ImGui::SliderInt(" ", &playing_fps, 1, 60);
+				ImGui::Text("Loop after finishing:");
+				ImGui::SameLine();
+				ToggleButton("loop", &loop_frames, 22);
+				ImGui::SetCursorPosX(65);
+				if (ImGui::Button("Save", { 75, 30 })) {
+					SaveSettings();
+					settings_playback = false;
+					settings_playback_set_pos = true;
+				}
+				ImGui::SameLine();
+				ImGui::SetCursorPosX(160);
+				if (ImGui::Button("Cancel", { 75, 30 })) {
+					LoadSettings();
+					settings_playback = false;
+					settings_playback_set_pos = true;
+				}
+				ImGui::End();
+			}
+		}
+		else {
+			if (!settings_playback_set_pos) {
+				settings_playback_set_pos = true;
+				LoadSettings();
+			}
+		}
+
         // main window
         ImGui::SetNextWindowPos({ 0, 27 }, ImGuiCond_Once);
 		ImGui::SetNextWindowSize({ (float)GetScreenWidth(), (float)GetScreenHeight() - 27 });
@@ -492,6 +722,7 @@ int main() {
 					if (recording)
 						FinishRecording();
 					else if (playing) {
+						played_frames = 0;
 						playing = false;
 						wait = false;
 					}
@@ -633,6 +864,7 @@ int main() {
 					}
 				}
 				else {
+					played_frames = 0;
 					playing = false;
 					wait = false;
 				}
@@ -663,9 +895,8 @@ int main() {
 				else if (!loaded_macro.empty())
 					loaded_macro.clear();
 			}
-
-            ImGui::End();
-
+			
+			ImGui::End();
         }
 
         rlImGuiEnd();

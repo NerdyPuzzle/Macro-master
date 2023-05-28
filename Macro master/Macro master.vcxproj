@@ -152,7 +152,7 @@
     <ResourceCompile Include="Macro master.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\..\..\..\Downloads\software.ico" />
+    <Image Include="..\..\..\..\Downloads\application.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

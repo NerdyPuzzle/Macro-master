@@ -236,7 +236,7 @@ void windows::PressKey(int key) {
     INPUT input;
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
-    input.ki.wScan = 0;  // Use MapVirtualKey to get the scan code
+    input.ki.wScan = 0;
     input.ki.dwFlags = 0; // 0 for key press
     input.ki.time = 0;
     input.ki.dwExtraInfo = 0;
