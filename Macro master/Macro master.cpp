@@ -39,6 +39,7 @@ std::vector<int> previous_inputs;
 std::pair<int, int> previous_mousepos = { -1, -1 };
 bool first_frame = false;
 bool ignore_delays = false;
+bool ignore_mouse = false;
 
 // playing state variables
 long long int played_frames = 0;
@@ -175,6 +176,9 @@ void LoadSettings() {
 		playing_fps = settings.at("playback").at("framerate");
 		ignore_delays = settings.at("recording").at("ignore_delays");
 		recording_fps = settings.at("recording").at("framerate");
+		// check if the setting exists to prevent previous versions from crashing on load
+		if (settings.at("recording").contains("ignore_mouse"))
+			ignore_mouse = settings.at("recording").at("ignore_mouse");
 		keybind_import = settings.at("keybinds").at("import");
 		keybind_record = settings.at("keybinds").at("record");
 		keybind_play = settings.at("keybinds").at("play");
@@ -189,6 +193,7 @@ void SaveSettings() {
 	settings["playback"]["framerate"] = playing_fps;
 	settings["recording"]["ignore_delays"] = ignore_delays;
 	settings["recording"]["framerate"] = recording_fps;
+	settings["recording"]["ignore_mouse"] = ignore_mouse;
 	settings["keybinds"]["import"] = keybind_import;
 	settings["keybinds"]["record"] = keybind_record;
 	settings["keybinds"]["play"] = keybind_play;
@@ -208,11 +213,14 @@ void StartRecording() {
 
 void RecordFrame() {
 	std::vector<int> inputs = windows::GetCurrentInputs();
-	std::pair<int, int> mousepos = windows::GetMousePos();
+	std::pair<int, int> mousepos = { 0, 0 };
+	if (!ignore_mouse);
+		mousepos = windows::GetMousePos();
 
 	if (first_frame) {
 		first_frame = false;
-		loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = {mousepos.first, mousepos.second};
+		if (!ignore_mouse)
+			loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = {mousepos.first, mousepos.second};
 		if (!inputs.empty())
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_down"] = inputs;
 	}
@@ -220,10 +228,12 @@ void RecordFrame() {
 		bool mouse_empty = false;
 		bool presses_empty = false;
 		bool releases_empty = false;
-		if ((mousepos.first != previous_mousepos.first) || (mousepos.second != previous_mousepos.second))
-			loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = { mousepos.first, mousepos.second };
-		else
-			mouse_empty = true;
+		if (!ignore_mouse) {
+			if ((mousepos.first != previous_mousepos.first) || (mousepos.second != previous_mousepos.second))
+				loaded_macro["frame_" + std::to_string(recorded_frames)]["mouse_pos"] = { mousepos.first, mousepos.second };
+			else
+				mouse_empty = true;
+		}
 		std::vector<int> released_inputs;
 		std::vector<int> pressed_inputs;
 		for (const int input : inputs) {
@@ -242,7 +252,7 @@ void RecordFrame() {
 			loaded_macro["frame_" + std::to_string(recorded_frames)]["inputs_released"] = released_inputs;
 		else
 			releases_empty = true;
-		if (ignore_delays && mouse_empty && presses_empty && releases_empty)
+		if (ignore_delays && (mouse_empty || ignore_mouse) && presses_empty && releases_empty)
 			recorded_frames--;
 	}
 
@@ -613,8 +623,8 @@ int main() {
 			if (settings_recording_set_pos) {
 				settings_recording_set_pos = false;
 				ImGui::OpenPopup("Recording settings");
-				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 155) / 2 });
-				ImGui::SetNextWindowSize({ 300, 155 });
+				ImGui::SetNextWindowPos({ (float)(GetScreenWidth() - 300) / 2, (float)(GetScreenHeight() - 185) / 2 });
+				ImGui::SetNextWindowSize({ 300, 185 });
 			}
 			if (ImGui::BeginPopupModal("Recording settings", &settings_recording, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
 				ImGui::AlignTextToFramePadding();
@@ -622,10 +632,18 @@ int main() {
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(ImGui::GetColumnWidth());
 				ImGui::SliderInt(" ", &recording_fps, 1, 60);
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 1);
 				ImGui::Text("Ignore empty frames:");
 				ImGui::SameLine();
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 1);
 				ToggleButton("frames_ignr", &ignore_delays, 22);
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2);
+				ImGui::Text("Ignore mouse movement:");
+				ImGui::SameLine();
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2);
+				ToggleButton("mouse_ignr", &ignore_mouse, 22);
 				ImGui::SetCursorPosX(65);
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 1);
 				if (ImGui::Button("Save", { 75, 30 })) {
 					SaveSettings();
 					settings_recording = false;
@@ -752,14 +770,18 @@ int main() {
 			}
 
 			if (!loaded_macro.empty() && loaded_macro.contains("frames")) {
-				if (ImGui::BeginTable("macro", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY)) {
-					ImGui::TableSetupScrollFreeze(3, 1);
+				if (ImGui::BeginTable("macro", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY)) {
+					ImGui::TableSetupScrollFreeze(4, 1);
+					ImGui::TableSetupColumn("Frame", ImGuiTableColumnFlags_NoHide, 0.5);
+					ImGui::AlignTextToFramePadding();
+					ImGui::Text("Frame");
 					ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_NoHide);
 					ImGui::AlignTextToFramePadding();
 					ImGui::Text("Action");
 					ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_NoHide);
 					ImGui::AlignTextToFramePadding();
 					ImGui::Text("Value");
+					ImGui::TableSetupColumn(" ", ImGuiTableColumnFlags_NoHide, 0.2);
 					ImGui::TableHeadersRow();
 					int id = 0;
 					for (long long int i = 0; i < loaded_macro["frames"]; i++) {
@@ -768,15 +790,18 @@ int main() {
 								ImGui::TableNextRow();
 								ImGui::TableSetColumnIndex(0);
 								ImGui::AlignTextToFramePadding();
-								ImGui::Text(std::format("{} Mouse movement", ICON_FA_I_CURSOR).c_str());
+								ImGui::Text(std::to_string(i).c_str());
 								ImGui::TableSetColumnIndex(1);
+								ImGui::AlignTextToFramePadding();
+								ImGui::Text(std::format("{} Mouse movement", ICON_FA_I_CURSOR).c_str());
+								ImGui::TableSetColumnIndex(2);
 								ImGui::AlignTextToFramePadding();
 								std::string pos = "( " + std::to_string(loaded_macro.at("frame_" + std::to_string(i)).at("mouse_pos").at(0).get<int>()) + ", " + std::to_string(loaded_macro.at("frame_" + std::to_string(i)).at("mouse_pos").at(1).get<int>()) + " )";
 								ImGui::Text(pos.c_str());
-								ImGui::TableSetColumnIndex(2);
+								ImGui::TableSetColumnIndex(3);
 								ImGui::PushID(id);
 								id++;
-								if (ImGui::Button(std::format("{} Remove", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
+								if (ImGui::Button(std::format("{}", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
 									loaded_macro["frame_" + std::to_string(i)].erase(loaded_macro["frame_" + std::to_string(i)].find("mouse_pos"));
 								}
 								ImGui::PopID();
@@ -786,14 +811,17 @@ int main() {
 									ImGui::TableNextRow();
 									ImGui::TableSetColumnIndex(0);
 									ImGui::AlignTextToFramePadding();
-									ImGui::Text(std::format("{} Key released", ICON_FA_CLIPBOARD).c_str());
+									ImGui::Text(std::to_string(i).c_str());
 									ImGui::TableSetColumnIndex(1);
 									ImGui::AlignTextToFramePadding();
-									ImGui::Text(windows::GetInputName(loaded_macro.at("frame_" + std::to_string(i)).at("inputs_released").at(l)).c_str());
+									ImGui::Text(std::format("{} Key release", ICON_FA_CLIPBOARD).c_str());
 									ImGui::TableSetColumnIndex(2);
+									ImGui::AlignTextToFramePadding();
+									ImGui::Text(windows::GetInputName(loaded_macro.at("frame_" + std::to_string(i)).at("inputs_released").at(l)).c_str());
+									ImGui::TableSetColumnIndex(3);
 									ImGui::PushID(id);
 									id++;
-									if (ImGui::Button(std::format("{} Remove", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
+									if (ImGui::Button(std::format("{}", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
 										auto path = json::json_pointer{ "/frame_" + std::to_string(i) + "/inputs_released" };
 										auto& file = loaded_macro[path];
 										file.erase(file.begin() + l);
@@ -806,14 +834,17 @@ int main() {
 									ImGui::TableNextRow();
 									ImGui::TableSetColumnIndex(0);
 									ImGui::AlignTextToFramePadding();
-									ImGui::Text(std::format("{} Key pressed", ICON_FA_CLIPBOARD).c_str());
+									ImGui::Text(std::to_string(i).c_str());
 									ImGui::TableSetColumnIndex(1);
 									ImGui::AlignTextToFramePadding();
-									ImGui::Text(windows::GetInputName(loaded_macro.at("frame_" + std::to_string(i)).at("inputs_down").at(l)).c_str());
+									ImGui::Text(std::format("{} Key press", ICON_FA_CLIPBOARD).c_str());
 									ImGui::TableSetColumnIndex(2);
+									ImGui::AlignTextToFramePadding();
+									ImGui::Text(windows::GetInputName(loaded_macro.at("frame_" + std::to_string(i)).at("inputs_down").at(l)).c_str());
+									ImGui::TableSetColumnIndex(3);
 									ImGui::PushID(id);
 									id++;
-									if (ImGui::Button(std::format("{} Remove", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
+									if (ImGui::Button(std::format("{}", ICON_FA_XMARK).c_str(), { ImGui::GetColumnWidth(), 28 })) {
 										auto path = json::json_pointer{ "/frame_" + std::to_string(i) + "/inputs_down" };
 										auto& file = loaded_macro[path];
 										file.erase(file.begin() + l);
