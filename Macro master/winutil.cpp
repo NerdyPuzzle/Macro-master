@@ -236,8 +236,8 @@ void windows::PressKey(int key) {
     INPUT input;
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
-    input.ki.wScan = 0;
-    input.ki.dwFlags = 0; // 0 for key press
+    input.ki.wScan = MapVirtualKey(LOBYTE(key), 0);
+    input.ki.dwFlags = KEYEVENTF_SCANCODE;
     input.ki.time = 0;
     input.ki.dwExtraInfo = 0;
 
@@ -265,8 +265,8 @@ void windows::ReleaseKey(int key) {
     INPUT input;
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
-    input.ki.wScan = 0;  // Use MapVirtualKey to get the scan code
-    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    input.ki.wScan = MapVirtualKey(LOBYTE(key), 0);
+    input.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
     input.ki.time = 0;
     input.ki.dwExtraInfo = 0;
 
