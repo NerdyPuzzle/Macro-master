@@ -243,17 +243,17 @@ void windows::PressKey(int key) {
 
     if (key >= VK_LBUTTON && key <= VK_XBUTTON2) {
         input.type = INPUT_MOUSE;
-        input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
 
         if (key == VK_RBUTTON) {
-            input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+            input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
         }
         else if (key == VK_MBUTTON) {
-            input.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN;
+            input.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN;
         }
         else if (key >= VK_XBUTTON1 && key <= VK_XBUTTON2) {
             int buttonOffset = key - VK_XBUTTON1;
-            input.mi.dwFlags = MOUSEEVENTF_XDOWN | (buttonOffset << 2);
+            input.mi.dwFlags |= MOUSEEVENTF_XDOWN | (buttonOffset << 2);
         }
     }
 
@@ -266,23 +266,23 @@ void windows::ReleaseKey(int key) {
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(key);
     input.ki.wScan = MapVirtualKey(LOBYTE(key), 0);
-    input.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+    input.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
     input.ki.time = 0;
     input.ki.dwExtraInfo = 0;
 
     if (key >= VK_LBUTTON && key <= VK_XBUTTON2) {
         input.type = INPUT_MOUSE;
-        input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
 
         if (key == VK_RBUTTON) {
-            input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+            input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
         }
         else if (key == VK_MBUTTON) {
-            input.mi.dwFlags = MOUSEEVENTF_MIDDLEUP;
+            input.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP;
         }
         else if (key >= VK_XBUTTON1 && key <= VK_XBUTTON2) {
             int buttonOffset = key - VK_XBUTTON1;
-            input.mi.dwFlags = MOUSEEVENTF_XUP | (buttonOffset << 2);
+            input.mi.dwFlags |= MOUSEEVENTF_XUP | (buttonOffset << 2);
         }
     }
 

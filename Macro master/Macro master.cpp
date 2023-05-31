@@ -68,7 +68,7 @@ bool settings_recording_set_pos = true;
 bool settings_playback = false;
 bool settings_playback_set_pos = true;
 
-ImVec4 ConvertColor(::Color color) {
+ImVec4 ConvertColor(Color color) {
 	return ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 
